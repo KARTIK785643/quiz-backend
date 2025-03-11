@@ -11,6 +11,8 @@ require("dotenv").config();
 
 const app = express();
 // Initialize Express app
+app.use(cors({ origin: "http://localhost:10000" , credentials: true})); // Allow all origins (for testing)
+
 app.use(express.static(path.join(__dirname, "build")));
 
 
@@ -18,7 +20,7 @@ app.use(express.static(path.join(__dirname, "build")));
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI || "your-mongodb-atlas-connection-string";
 const JWT_SECRET = process.env.JWT_SECRET || "your_secret_key";
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:10000";
 
 // Middleware setup
 app.use(express.json());
@@ -78,13 +80,13 @@ app.get("/", (req, res) => {
 
 // Database Connection
 console.log("Attempting to connect to MongoDB...");
+mongoose.set("debug", true);
 mongoose.set("strictQuery", false);
 mongoose
   .connect(MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-    serverSelectionTimeoutMS: 5000 // Increase timeout to 5 seconds
-
+    serverSelectionTimeoutMS: 10000 // Increase timeout to 10 seconds
   })
   .then(() => {
     console.log("✅ MongoDB connected successfully");
@@ -103,62 +105,65 @@ const userSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model("User", userSchema);
-// Register Route
-// Register Route
+
 app.post("/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
-    
+
     if (!username || !email || !password) {
       return res.status(400).json({ error: "All fields are required!" });
     }
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: "Email already registered!" });
     }
 
-    // Hash password before storing
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Save new user
     const newUser = new User({ username, email, password: hashedPassword });
+
     await newUser.save();
 
-    res.status(201).json({ message: "User registered successfully!" });
+    console.log("✅ User registered:", newUser);
+
+    // ✅ Ensure correct response is sent
+    return res.status(201).json({ message: "User registered successfully" });
+
   } catch (error) {
-    console.error("Error saving user:", error);
+    console.error("❌ Error saving user:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+
+app.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    console.log("🔍 Login Attempt:", req.body); // Debugging
+
+    // Check if user exists
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ error: "Invalid email or password!" });
+    }
+
+    // Compare hashed passwords
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: "Invalid email or password!" });
+    }
+
+    console.log("✅ Login successful:", user); // Debugging
+
+    res.status(200).json({ message: "Login successful!" });
+  } catch (error) {
+    console.error("❌ Login Error:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-  app.post("/login", async (req, res) => {
-    try {
-      const { email, password } = req.body;
-      console.log("Login attempt:", email); // Debugging log
-  
-      const user = await User.findOne({ email });
-      if (!user) {
-        console.log("❌ User not found in DB");
-        return res.status(400).json({ error: "Invalid Credentials!" });
-      }
-  
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        console.log("❌ Password does not match");
-        return res.status(400).json({ error: "Invalid Credentials!" });
-      }
-  
-      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
-      
-      console.log("✅ Login Successful");
-      res.json({ message: "✅ Login Successful!", token });
-    } catch (error) {
-      console.error("❌ Error logging in:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-  
+
 
 // PROFILE API
 app.get("/profile", authMiddleware, async (req, res) => {
